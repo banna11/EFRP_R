@@ -1,0 +1,288 @@
+---
+title: "HF2_final"
+author: "Bánóczi Anna, Heilmann István, Reizinger Kristóf"
+date: '2019 11 19 '
+output: html_document
+---
+
+#Required packages
+```{r}
+library(assertthat)
+library(corrplot)
+library(zoo)
+```
+
+
+#The first function checks whether readxl package is installed on your computer or not
+#This is a side function for import_dataset_WTI
+
+
+```{r}
+pack_check <- function()
+{
+  my_packages <- library()$results
+  n = length(my_packages)
+  readpackage = 0
+  for(i in 1:n)
+  {
+    if (my_packages[i] == "readxl")
+    {
+      readpackage <- i
+    }
+  }
+  return(readpackage)
+}
+```
+
+
+
+##The next function imports the (WTI) dataset that we gave in and then shows the database
+
+```{r}
+import_dataset_WTI <- function()
+{
+   path_wti <- "C:/Users/banna/Documents/egyetem/EFRP/R//WTI2.xlsx"
+  if (pack_check() == 0)
+  {
+    # readxl package is not installed, so now we have to
+    install.packages("readxl")
+  }
+  library("readxl")
+  WTI_fut <<- read_excel(path_wti)
+  # View(WTI_fut)
+  return(WTI_fut)
+}
+
+```
+
+#The next function converts the raw dataset into a new one by making 
+#The returns from day n to day n + 1
+#The first column remains the same as it is our date vector, 
+#And the first row is empty as we don't have data before the first day
+
+```{r}
+return_maker <- function(WTI_fut)
+{
+  n <- nrow(WTI_fut)
+  m <- ncol(WTI_fut)
+  ret_WTI_fut <<- matrix(nrow = n, ncol = m)
+  for (i in 2:n)
+  {
+    for (j in 2:m)
+    {
+      ret_WTI_fut[i,j] <<- (WTI_fut[[i,j]] / WTI_fut[[i-1,j]]) - 1
+    }
+  }
+  
+  ret_WTI_fut <<- cbind(WTI_fut[,1], ret_WTI_fut)
+  ret_WTI_fut = ret_WTI_fut[-1,-2]
+  colnames(ret_WTI_fut) = colnames(WTI_fut)
+  # View(ret_WTI_fut)
+  return(ret_WTI_fut)
+}
+
+```
+
+
+#This function's inputs will be saved for other functions's parameters
+#Please give the dates in this format : "yyyy-mm-dd"
+
+```{r}
+parameter_lists <- function(asset1, asset2, startDate, endDate, windowLength, lag)
+{
+  parameters<-list(asset1,asset2,startDate,endDate,windowLength,lag)
+  return(parameters)
+  
+}
+
+```
+
+#This function generates the correlation-timeseries table
+#The column name's first part shows the unlagged vector,the second part shows the lagged one
+#Please type the dates in this format : "yyyy-mm-dd"
+#Lag can be negative or positive, depends on the direction you want. 
+#e.g. -5 lagg means that the other vector will be lagged back in time
+#Asset1 and asset2 are integers
+
+```{r}
+time_series_generating <- function(parameters)
+{
+  asset1<-parameters[[1]]
+  asset2<-parameters[[2]]
+  startDate<-parameters[[3]]
+  endDate<-parameters[[4]]
+  windowLength<-parameters[[5]]
+  lag<-parameters[[6]]
+  
+  
+  absStart <- min(ret_WTI_fut[,1]) #first date in the vector
+  absEnd <- max(ret_WTI_fut[,1]) #largest date in the vector
+  
+  if (as.Date(startDate, origin = "1970-01-01") > as.Date(endDate, origin = "1970-01-01"))
+  {
+    return("StartDate starts after EndDate!")
+  }
+  if (as.Date(startDate, origin = "1970-01-01") + lag < as.Date(absStart, origin = "1970-01-01"))
+  { 
+    return("The starting date and the lag gets out of our dataset!")
+  }
+  if (as.Date(endDate, origin = "1970-01-01") + lag > as.Date(absEnd, origin = "1970-01-01")) 
+  {
+    return("The ending date and the lagg gets out of the dataset!")
+  }
+  
+  for (i in 1:length(asset1))
+  {
+    if (as.Date(ret_WTI_fut[[i,1]]) - as.Date(startDate, origin = "1970-01-01") == 0)
+    {
+      startDateIndex = i 
+    }
+  }
+  
+#first row if return matrix is NA for each item!
+  n <- (as.numeric(as.Date(endDate), origin = "1970-01-01")) - (as.numeric(as.Date(startDate), origin = "1970-01-01")) - windowLength 
+#n is the length of the time series
+  
+  
+  correlations <- vector(length = n)
+  timeVector <- vector(length = n)
+#calculate the values of the vector for each item
+  for (i in 1:n)
+  {
+    correlations[i] = cor(asset1[(startDateIndex + i - 1):(startDateIndex + i + windowLength - 1)],
+                          asset2[(startDateIndex - 1 + i + lag):(startDateIndex - 1 + i + lag + windowLength)])
+    timeVector[i] = as.Date(as.numeric(as.Date(startDate), origin="1970-01-01") + i - 1, origin = "1970-01-01")
+  }
+  
+  class(timeVector) <- "Date"
+  
+  timeSeries <- data.frame(timeVector, correlations)
+  return(timeSeries)
+}
+
+```
+
+
+
+#New object in order to have a network
+
+```{r}
+network_statistics <-function(startdate=sdate, enddate=edate, ws=winsize,cl=10)
+{
+# parameters
+# startdate first date of the analyzed period
+# enddate last date of the analyzed period
+# windowsize
+# cl correlation lag
+  
+second_dim <- as.numeric(as.Date(enddate) - as.Date(startdate)) - ws
+# length of the
+
+m <-24 # number of assets
+
+# select dates from the original data table
+from <- which(as.Date(ret_WTI_fut[,1])==startdate) # first coordinate
+to <- which(as.Date(ret_WTI_fut[,1])==enddate)-ws-1 # second coordinate
+dates <-zoo::as.Date(ret_WTI_fut[-1,1][from:to]) # dates vector
+
+dates <- as.character(dates) # labels for columns
+
+assets <- as.character(seq(1,m)) # assets indicators from 1 to 24 (m=24)
+
+network <- array(dim = c(m, second_dim, m), data = NA, dimnames = list(assets,dates, assets))
+# 3 dimensional array for calculations
+
+# calxulation of cross-correlations for all date sand assets
+for (i in 3:(m+2)) {
+  for (j in 3:(m+2)) {
+    # tempt <- time_series_generating(parameter_lists(ret_WTI_fut[-1,i], ret_WTI_fut[-1,j], startdate, enddate, ws,cl))[,2]
+    tempt <- time_series_generating(parameter_lists(ret_WTI_fut[-1,i], ret_WTI_fut[-1,j], startdate, enddate, ws,cl))[,2]
+    
+    for (k in 1:second_dim) {
+      network[i-2, k, j-2] <- tempt[k]
+
+    }
+  }
+}
+
+return(network)
+
+}
+
+```
+
+
+#Making the plots of the time series
+```{r}
+plot_timeseries <- function(network=network,startdate=sdate,enddate=edate, ws=winsize )
+{
+  second_dim <- as.numeric(as.Date(enddate) - as.Date(startdate)) - ws
+  
+  networkmmm <- matrix(nrow = second_dim,ncol=3, data = NA) # matrix for Min, Max, Mean
+  colnames(networkmmm) <- c("min", "max", "mean")
+  for(l in 1:second_dim){
+    networkmmm[l,"min"] <- min(network[,l,])
+    networkmmm[l,"max"] <- max(network[,l,])
+    networkmmm[l,"mean"] <- mean(diag(network[,l,]) + network[,l,])/2
+  }
+
+  ts1 <- networkmmm[,"min"]
+  ts2 <- networkmmm[,"max"]
+  ts3 <- networkmmm[,"mean"]
+  
+  from <- which(as.Date(ret_WTI_fut[,1])==startdate)
+  to <- which(as.Date(ret_WTI_fut[,1])==enddate)-ws-1
+  dates <-zoo::as.Date(ret_WTI_fut[-1,1][from:to])
+
+  plot(dates, ts1, "l", col = "red", xlab = "Time", ylab = "Correlation", main = "Dynamic cross-correlations")
+
+  lines(dates, ts2, "l", col = "blue")
+
+  lines(dates, ts3, "l", col="green")
+
+  legend("bottomleft", legend = c("min","max","mean"), fill = c("red","blue","green"), cex = 0.6)
+  
+  
+}
+```
+
+#For plotting the correlations
+```{r}
+corr_plot <- function(network=network, day="2013-06-10" ){
+  assertthat::assert_that(zoo::as.Date(day)>zoo::as.Date(sdate),msg=paste0("Choose a date another date!","Day must be later than ", sdate, " !"))
+  assertthat::assert_that(zoo::as.Date(day)<zoo::as.Date(edate),msg=paste0("Choose a date another date!","Day must be earlier than ", sedate, " !"))
+  
+corrplot::corrplot(network[,day,], method = "square", cl.lim = c(-0.2, 0.2), 
+         col = colorRampPalette(c("blue", "green"))(100))
+ 
+}
+```
+
+#Network plot between assets pairwise cross-correlations
+#Trying out the functions
+
+```{r}
+pack_check()
+
+import_dataset_WTI()
+
+return_maker(WTI_fut)
+```
+
+
+# Inputs for network and plotting
+
+```{r}
+
+sdate <- "2012-01-01"
+edate <- "2014-12-31"
+winsize <- 100
+```
+
+#Plots
+```{r}
+nw <-network_statistics(startdate=sdate, enddate=edate, ws=winsize, cl=10)
+plot_timeseries(network=nw,startdate=sdate,enddate=edate, ws=winsize)
+corr_plot(network=nw, day="2013-06-10")
+```
+
